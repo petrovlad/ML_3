@@ -10,9 +10,9 @@ from matplotlib import pyplot as plt
 USE_LARGE_DATASET = False
 if USE_LARGE_DATASET:
     DATASET_DIR = r'./dataset/notMNIST_large/'
-    TRAIN_SIZE = 200000
+    TRAIN_SIZE = 100000
     VALIDATION_SIZE = 10000
-    TEST_SIZE = 19000
+    TEST_SIZE = 10000
 else:
     DATASET_DIR = r'./dataset/notMNIST_small/'
     TRAIN_SIZE = 13000
@@ -86,13 +86,6 @@ def create_data_frame():
     return data_frame
 
 
-def show_classes_histogram(classes_images_counts):
-    plt.figure()
-    plt.bar(LABELS, classes_images_counts)
-    plt.show()
-    logging.info("Histogram shown")
-
-
 def verify_balance(data_frame):
     classes_images_counts = list()
     for class_index in range(LABELS_COUNT):
@@ -107,8 +100,12 @@ def verify_balance(data_frame):
     avg_images_count = sum(classes_images_counts) / len(classes_images_counts)
     balance_percent = avg_images_count / max_images_count
 
-    show_classes_histogram(classes_images_counts)
+    plt.figure()
+    plt.bar(LABELS, classes_images_counts)
+    plt.show()
+    logging.info("Histogram shown")
     logging.info(f"Balance: {balance_percent:.3f}")
+
     if balance_percent > BALANCE_PERCENT_BORDER:
         logging.info("Classes are balanced")
     else:
@@ -136,12 +133,49 @@ def split_dataset(data_frame):
     return train_dataset, validation_dataset, test_dataset
 
 
-def get_statistics(model, train_dataset, validation_dataset, test_dataset, with_optimization=False):
-    # todo stats
-    pass
+def get_stats(model, train_dataset, validation_dataset, test_dataset, with_optimization=False):
+    train_dataset = train_dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+    validation_dataset = validation_dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+    test_dataset = test_dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+
+    # todo test sigmoid & relu and user the best option
+    convolutional_model = tf.keras.Sequential([
+        tf.keras.layers.Rescaling(1.0 / 255),
+        tf.keras.layers.Conv2D(32, (3, 3), activation='sigmoid', input_shape=(28, 28, 1), kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.Dropout(0.1),
+        tf.keras.layers.Conv2D(64, (3, 3), activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.Dropout(0.1),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(128, activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(LABELS_COUNT, activation='softmax')
+    ])
+    pooling_model = tf.keras.Sequential([
+        tf.keras.layers.Rescaling(1.0 / 255),
+        tf.keras.layers.Conv2D(32, (3, 3), activation='sigmoid', input_shape=(28, 28, 1), kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Conv2D(64, (3, 3), activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(128, activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(LABELS_COUNT, activation='softmax')
+    ])
+    lenet_model = tf.keras.Sequential([
+        tf.keras.layers.Rescaling(1.0 / 255),
+        tf.keras.layers.Conv2D(6, (5, 5), activation='sigmoid', input_shape=(28, 28, 1), kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Conv2D(16, (5, 5), activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.MaxPooling2D((2, 2)),
+        tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(120, activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.Dense(84, activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
+        tf.keras.layers.Dense(LABELS_COUNT, activation='softmax')
+    ])
+    # todo stats & analyze
 
 
-def get_neural_network_statistics(train_dataset, validation_dataset, test_dataset):
+def get_single_stats(train_dataset, validation_dataset, test_dataset):
     # todo implement network
     pass
 
@@ -162,7 +196,7 @@ def main():
 
     train_dataset, validation_dataset, test_dataset = split_dataset(data_frame)
 
-    losses, accuracies, validation_losses, validation_accuracies = get_neural_network_statistics(
+    losses, accuracies, validation_losses, validation_accuracies = get_single_stats(
         train_dataset, validation_dataset, test_dataset
     )
     show_result_plot(losses, accuracies, validation_losses, validation_accuracies)
