@@ -1,7 +1,6 @@
 import os
 import cv2
 import random
-import logging
 import datetime
 import pandas
 import tensorflow as tf
@@ -22,20 +21,11 @@ else:
 LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
 LABELS_COUNT = len(LABELS)
 
-DATA_COLUMN_NAME = 'data'
-LABELS_COLUMN_NAME = 'labels'
-HASHED_DATA_COLUMN_NAME = 'data_bytes'
-
-BALANCE_PERCENT_BORDER = 0.85
-
 BATCH_SIZE = 128
-INITIAL_LEARNING_RATE = 0.01
-MIN_LEARNING_RATE = 1e-6
 DECAY_STEPS = 12000
 DECAY_RATE = 0.8
 EPOCHS = 50
 EPOCHS_RANGE = range(EPOCHS)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def output_random_images():
@@ -71,7 +61,6 @@ def create_data_frame():
         labels.extend([LABELS.index(label) for _ in range(len(class_data))])
 
     data_frame = pandas.DataFrame({'data': data, 'label': labels})
-    logging.info("Data frame is created")
 
     # removing dups
     data_bytes = [item.tobytes() for item in data_frame['data']]
@@ -81,45 +70,41 @@ def create_data_frame():
     data_frame.drop_duplicates(subset='hash', keep='first', inplace=True)
     cnt_after = len(data_frame)
     data_frame.pop('hash')
-    logging.info(f"{cnt_before - cnt_after} duplicates removed")
+    print(f"{cnt_before - cnt_after} duplicates removed")
 
     return data_frame
 
 
 def verify_balance(data_frame):
     classes_images_counts = list()
-    for class_index in range(LABELS_COUNT):
-        labels = data_frame[LABELS_COLUMN_NAME]
-        class_rows = data_frame[labels == class_index]
+    for label in range(LABELS_COUNT):
+        labels = data_frame['label']
+        class_rows = data_frame[labels == label]
         class_count = len(class_rows)
 
         classes_images_counts.append(class_count)
-        logging.info(f"Class {LABELS[class_index]} contains {class_count} images")
+        print(f"`{LABELS[label]}` size == {class_count}")
 
     max_images_count = max(classes_images_counts)
     avg_images_count = sum(classes_images_counts) / len(classes_images_counts)
     balance_percent = avg_images_count / max_images_count
-
-    plt.figure()
-    plt.bar(LABELS, classes_images_counts)
-    plt.show()
-    logging.info("Histogram shown")
-    logging.info(f"Balance: {balance_percent:.3f}")
-
-    if balance_percent > BALANCE_PERCENT_BORDER:
-        logging.info("Classes are balanced")
+    #plt.figure()
+    #plt.bar(LABELS, classes_images_counts)
+    #plt.show()
+    if balance_percent > 0.85:
+        print("Classes are balanced")
     else:
-        logging.info("Classes are not balanced")
+        print("Classes are not balanced")
 
 
-def shuffle_data(data):
+def shuffle_dataframe(data):
     # todo: do i need random state?
     return data.sample(frac=1, random_state=1337)
 
 
 def split_dataset(data_frame):
-    data = list(data_frame[DATA_COLUMN_NAME].values)
-    labels = list(data_frame[LABELS_COLUMN_NAME].values)
+    data = list(data_frame['data'].values)
+    labels = list(data_frame['label'].values)
 
     data_dataset = tf.data.Dataset.from_tensor_slices(data)
     labels_dataset = tf.data.Dataset.from_tensor_slices(labels)
@@ -128,12 +113,10 @@ def split_dataset(data_frame):
     train_dataset = dataset.take(TRAIN_SIZE).batch(BATCH_SIZE)
     validation_dataset = dataset.skip(TRAIN_SIZE).take(VALIDATION_SIZE).batch(BATCH_SIZE)
     test_dataset = dataset.skip(TRAIN_SIZE + VALIDATION_SIZE).take(TEST_SIZE).batch(BATCH_SIZE)
-    logging.info("Data split")
-
     return train_dataset, validation_dataset, test_dataset
 
 
-def get_stats(model, train_dataset, validation_dataset, test_dataset, with_optimization=False):
+def get_stats(train_dataset, validation_dataset, test_dataset):
     train_dataset = train_dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
     validation_dataset = validation_dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
     test_dataset = test_dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
@@ -172,37 +155,74 @@ def get_stats(model, train_dataset, validation_dataset, test_dataset, with_optim
         tf.keras.layers.Dense(84, activation='sigmoid', kernel_regularizer=tf.keras.regularizers.L2(0.001)),
         tf.keras.layers.Dense(LABELS_COUNT, activation='softmax')
     ])
-    # todo stats & analyze
+
+    convolutional_model_stats = get_single_stats(convolutional_model, train_dataset, validation_dataset, test_dataset, 'convolutional')
+    pooling_model_stats = get_single_stats(pooling_model, train_dataset, validation_dataset, test_dataset, 'pooling')
+    lenet_model_stats = get_single_stats(lenet_model, train_dataset, validation_dataset, test_dataset, 'lenet')
+
+    return convolutional_model_stats, pooling_model_stats, lenet_model_stats
 
 
-def get_single_stats(train_dataset, validation_dataset, test_dataset):
-    # todo implement network
-    pass
+def get_single_stats(model, train_dataset, validation_dataset, test_dataset, model_name):
+    model.compile(
+        optimizer=tf.keras.optimizers.experimental.SGD(learning_rate=0.01),
+        loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False),
+        metrics=['accuracy'])
 
+    model_history = model.fit(
+        x=train_dataset,
+        validation_data=validation_dataset,
+        epochs=EPOCHS,
+        callbacks=None,
+        verbose=1
+    )
 
-def show_result_plot(losses, accuracies, validation_losses, validation_accuracies):
-    # todo plots
-    pass
+    loss, accuracy = model.evaluate(test_dataset)
+    print(f"{model_name}: {accuracy=}, {loss=}")
+
+    return (model_history.history['loss'],
+            model_history.history['accuracy'],
+            model_history.history['val_loss'],
+            model_history.history['val_accuracy'])
 
 
 def main():
-    start_time = datetime.datetime.now()
-
     output_random_images()
 
     data_frame = create_data_frame()
     verify_balance(data_frame)
-    data_frame = shuffle_data(data_frame)
+    data_frame = shuffle_dataframe(data_frame)
 
     train_dataset, validation_dataset, test_dataset = split_dataset(data_frame)
 
-    losses, accuracies, validation_losses, validation_accuracies = get_single_stats(
-        train_dataset, validation_dataset, test_dataset
-    )
-    show_result_plot(losses, accuracies, validation_losses, validation_accuracies)
+    c_stats, p_stats, l_stats = get_stats(train_dataset, validation_dataset, test_dataset)
+    plt.figure(figsize=(20, 14))
 
-    end_time = datetime.datetime.now()
-    logging.info(end_time - start_time)
+    plt.subplot(1, 2, 1)
+    plt.title('Training and Validation Loss')
+
+    plt.plot(EPOCHS_RANGE, c_stats[0], label='Train Convolutional Loss')
+    plt.plot(EPOCHS_RANGE, c_stats[2], label='Validation Convolutional Loss')
+
+    plt.plot(EPOCHS_RANGE, p_stats[0], label='Train Pooling Loss')
+    plt.plot(EPOCHS_RANGE, p_stats[2], label='Validation Pooling Loss')
+
+    plt.plot(EPOCHS_RANGE, l_stats[0], label='Train Lenet Loss')
+    plt.plot(EPOCHS_RANGE, l_stats[2], label='Validation Lenet Loss')
+
+    plt.subplot(1, 2, 2)
+    plt.title('Training and Validation Accuracy')
+
+    plt.plot(EPOCHS_RANGE, c_stats[1], label='Train Convolutional Accuracy')
+    plt.plot(EPOCHS_RANGE, c_stats[3], label='Validation Convolutional Accuracy', linestyle='dashed')
+
+    plt.plot(EPOCHS_RANGE, p_stats[1], label='Train Pooling Accuracy')
+    plt.plot(EPOCHS_RANGE, p_stats[3], label='Validation Pooling Accuracy', linestyle='dashed')
+
+    plt.plot(EPOCHS_RANGE, l_stats[1], label='Train Lenet Accuracy')
+    plt.plot(EPOCHS_RANGE, l_stats[3], label='Validation Lenet Accuracy', linestyle='dashed')
+
+    plt.show()
 
 
 if __name__ == '__main__':
