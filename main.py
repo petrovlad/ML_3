@@ -6,7 +6,7 @@ import pandas
 import tensorflow as tf
 from matplotlib import pyplot as plt
 
-USE_LARGE_DATASET = False
+USE_LARGE_DATASET = True
 if USE_LARGE_DATASET:
     DATASET_DIR = r'./dataset/notMNIST_large/'
     TRAIN_SIZE = 100000
